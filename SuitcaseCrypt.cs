@@ -73,8 +73,8 @@ public static class SuitcaseCrypt
 
         byte[] raw = Convert.FromBase64String(encryptedText);
 
-        if (raw.Length < NonceLength + TagLength + 1)
-            throw new ArgumentException("Encrypted data is too short to contain a nonce, ciphertext, and tag.", nameof(encryptedText));
+        if (raw.Length < NonceLength + TagLength)
+            throw new ArgumentException("Encrypted data is too short to contain a nonce and tag.", nameof(encryptedText));
 
         byte[] nonce = raw[..NonceLength];
         byte[] cipherBytes = raw[NonceLength..^TagLength];
