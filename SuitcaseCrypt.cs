@@ -4,11 +4,12 @@ using System.Text;
 namespace Snowcap.TCrypt;
 
 /// <summary>
-/// Snowcap TCrypt — AES-256-CBC string encryption and decryption.
+/// Snowcap TCrypt — AES-256-GCM authenticated string encryption and decryption.
 ///
-/// Format: Base64(IV + ciphertext)
-///   - 16-byte random IV generated per encryption (prepended to ciphertext)
-///   - AES-256-CBC with PKCS7 padding
+/// Format: Base64(nonce + ciphertext + tag)
+///   - 12-byte random nonce generated per encryption
+///   - AES-256-GCM (AEAD — provides confidentiality + integrity + authenticity)
+///   - 16-byte authentication tag appended after ciphertext
 ///   - 32-byte (256-bit) key required
 ///
 /// This is the standard encryption format for all Snowcap applications.
@@ -16,15 +17,16 @@ namespace Snowcap.TCrypt;
 /// </summary>
 public static class SuitcaseCrypt
 {
-    private const int KeyLength = 32;   // AES-256
-    private const int IvLength = 16;    // AES block size
+    private const int KeyLength = 32;    // AES-256
+    private const int NonceLength = 12;  // GCM standard nonce
+    private const int TagLength = 16;    // GCM authentication tag
 
     /// <summary>
-    /// Encrypts a plaintext string using AES-256-CBC with a random IV.
+    /// Encrypts a plaintext string using AES-256-GCM with a random nonce.
     /// </summary>
     /// <param name="plainText">The string to encrypt.</param>
     /// <param name="key">The 32-byte AES-256 key.</param>
-    /// <returns>Base64-encoded string containing IV + ciphertext.</returns>
+    /// <returns>Base64-encoded string containing nonce + ciphertext + tag.</returns>
     /// <exception cref="ArgumentNullException">Thrown when plainText or key is null.</exception>
     /// <exception cref="ArgumentException">Thrown when key length is not 32 bytes.</exception>
     public static string Encrypt(string plainText, byte[] key)
@@ -33,21 +35,19 @@ public static class SuitcaseCrypt
         ArgumentNullException.ThrowIfNull(key);
         ValidateKeyLength(key);
 
-        byte[] iv = RandomNumberGenerator.GetBytes(IvLength);
         byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+        byte[] nonce = RandomNumberGenerator.GetBytes(NonceLength);
+        byte[] cipherBytes = new byte[plainBytes.Length];
+        byte[] tag = new byte[TagLength];
 
-        using var aes = Aes.Create();
-        aes.Key = key;
-        aes.IV = iv;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
+        using var aes = new AesGcm(key, TagLength);
+        aes.Encrypt(nonce, plainBytes, cipherBytes, tag);
 
-        using var encryptor = aes.CreateEncryptor();
-        byte[] cipherBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
-
-        byte[] result = new byte[IvLength + cipherBytes.Length];
-        Buffer.BlockCopy(iv, 0, result, 0, IvLength);
-        Buffer.BlockCopy(cipherBytes, 0, result, IvLength, cipherBytes.Length);
+        // Wire format: nonce[12] + ciphertext[n] + tag[16]
+        byte[] result = new byte[NonceLength + cipherBytes.Length + TagLength];
+        Buffer.BlockCopy(nonce, 0, result, 0, NonceLength);
+        Buffer.BlockCopy(cipherBytes, 0, result, NonceLength, cipherBytes.Length);
+        Buffer.BlockCopy(tag, 0, result, NonceLength + cipherBytes.Length, TagLength);
 
         return Convert.ToBase64String(result);
     }
@@ -55,12 +55,12 @@ public static class SuitcaseCrypt
     /// <summary>
     /// Decrypts a Base64-encoded encrypted string produced by <see cref="Encrypt"/>.
     /// </summary>
-    /// <param name="encryptedText">The Base64-encoded string containing IV + ciphertext.</param>
+    /// <param name="encryptedText">The Base64-encoded string containing nonce + ciphertext + tag.</param>
     /// <param name="key">The 32-byte AES-256 key.</param>
     /// <returns>The decrypted plaintext string.</returns>
     /// <exception cref="ArgumentNullException">Thrown when encryptedText or key is null.</exception>
     /// <exception cref="ArgumentException">Thrown when encryptedText is empty or too short, or key length is invalid.</exception>
-    /// <exception cref="CryptographicException">Thrown when decryption fails (wrong key, corrupted data).</exception>
+    /// <exception cref="CryptographicException">Thrown when decryption fails (wrong key, corrupted data, or tampered ciphertext).</exception>
     public static string Decrypt(string encryptedText, byte[] key)
     {
         ArgumentNullException.ThrowIfNull(encryptedText);
@@ -73,20 +73,16 @@ public static class SuitcaseCrypt
 
         byte[] raw = Convert.FromBase64String(encryptedText);
 
-        if (raw.Length <= IvLength)
-            throw new ArgumentException("Encrypted data is too short to contain an IV and ciphertext.", nameof(encryptedText));
+        if (raw.Length < NonceLength + TagLength + 1)
+            throw new ArgumentException("Encrypted data is too short to contain a nonce, ciphertext, and tag.", nameof(encryptedText));
 
-        byte[] iv = raw[..IvLength];
-        byte[] cipherBytes = raw[IvLength..];
+        byte[] nonce = raw[..NonceLength];
+        byte[] cipherBytes = raw[NonceLength..^TagLength];
+        byte[] tag = raw[^TagLength..];
+        byte[] plainBytes = new byte[cipherBytes.Length];
 
-        using var aes = Aes.Create();
-        aes.Key = key;
-        aes.IV = iv;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
-
-        using var decryptor = aes.CreateDecryptor();
-        byte[] plainBytes = decryptor.TransformFinalBlock(cipherBytes, 0, cipherBytes.Length);
+        using var aes = new AesGcm(key, TagLength);
+        aes.Decrypt(nonce, cipherBytes, tag, plainBytes);
 
         return Encoding.UTF8.GetString(plainBytes);
     }

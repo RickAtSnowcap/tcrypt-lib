@@ -1,12 +1,12 @@
 # Snowcap TCrypt
 
-AES-256-CBC string encryption library for .NET 10. Native AOT compatible.
+AES-256-GCM authenticated encryption library for .NET 10. Native AOT compatible.
 
 ## What it does
 
-Encrypts and decrypts strings using AES-256-CBC with PKCS7 padding. Each encryption generates a random 16-byte IV that is prepended to the ciphertext and Base64-encoded. The same encrypted format is used across C# and Python consumers in Snowcap applications.
+Encrypts and decrypts strings using AES-256-GCM — an AEAD cipher that provides confidentiality, integrity, and authenticity in a single operation. Each encryption generates a random 12-byte nonce and produces a 16-byte authentication tag. Tampered ciphertext is detected and rejected on decrypt.
 
-**Wire format:** `Base64(IV + ciphertext)`
+**Wire format:** `Base64(nonce[12] + ciphertext[n] + tag[16])`
 
 ## Key delivery: the Suitcase pattern
 
@@ -32,7 +32,7 @@ byte[] key = Convert.FromBase64String("your-base64-key-here");
 // Encrypt
 string encrypted = SuitcaseCrypt.Encrypt("sensitive data", key);
 
-// Decrypt
+// Decrypt (throws CryptographicException if tampered)
 string plaintext = SuitcaseCrypt.Decrypt(encrypted, key);
 ```
 
@@ -40,12 +40,12 @@ string plaintext = SuitcaseCrypt.Decrypt(encrypted, key);
 
 The wire format is intentionally simple so any language can produce or consume it:
 
-1. Generate 16 random bytes (IV)
-2. AES-256-CBC encrypt with PKCS7 padding
-3. Concatenate `IV + ciphertext`
+1. Generate 12 random bytes (nonce)
+2. AES-256-GCM encrypt, producing ciphertext + 16-byte auth tag
+3. Concatenate `nonce + ciphertext + tag`
 4. Base64-encode
 
-Python, Node, Go, or anything else with AES-CBC support can interop with this format using the same key.
+Python, Node, Go, or anything else with AES-GCM support can interop with this format using the same key.
 
 ## Project reference
 
