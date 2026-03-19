@@ -18,6 +18,35 @@ TCrypt includes a `LoadKey()` method that reads the 32-byte AES key from systemd
 LoadCredentialEncrypted=suitcase-key:/etc/credstore.encrypted/suitcase-key
 ```
 
+## Suitcase key backup and recovery
+
+The TPM-sealed `.cred` file becomes unreadable if the TPM state changes — firmware updates (PCR 0/1), hardware failure, or migration to a new machine. Storing the Base64-encoded key offline protects against all three scenarios.
+
+**Export the key (one-time):**
+
+```bash
+sudo systemd-creds decrypt --name=suitcase-key \
+  /etc/credstore.encrypted/suitcase-key.cred - | base64
+```
+
+This prints the Base64-encoded 32-byte key to stdout. Copy it to your offline secret manager (mSecure, 1Password, etc.). Nothing is written to disk.
+
+**Re-seal the key (after TPM state change):**
+
+```bash
+echo "BASE64_KEY_HERE" | base64 -d | \
+  sudo systemd-creds encrypt --with-key=tpm2 --tpm2-pcrs=0+1+7 \
+  --name=suitcase-key - /etc/credstore.encrypted/suitcase-key.cred
+```
+
+This decodes the key, seals it to the current TPM state, and writes the new `.cred` file. Then restart any services that depend on it:
+
+```bash
+sudo systemctl restart lucyapi
+```
+
+All existing encrypted data — database secrets, Suitcase entries in appsettings files — will decrypt immediately. The key is the same; only the TPM seal is new.
+
 ## Usage
 
 ```csharp
