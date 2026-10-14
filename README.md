@@ -29,7 +29,7 @@ sudo systemd-creds decrypt --name=suitcase-key \
   /etc/credstore.encrypted/suitcase-key.cred - | base64
 ```
 
-This prints the Base64-encoded 32-byte key to stdout. Copy it to your offline secret manager (mSecure, 1Password, etc.). Nothing is written to disk.
+This prints the Base64-encoded 32-byte key to stdout. Copy it to your offline secret manager (a PW Mgr). Nothing is written to disk.
 
 **Re-seal the key (after TPM state change):**
 
